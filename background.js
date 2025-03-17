@@ -1,5 +1,8 @@
 const errorUrls = new Set();
-
+// 获取存储键名
+function getActionsKey() {
+  return 'userActions_' + window.location.host;
+}
 /**
  * 生成操作分析报告
  * 该函数处理给定的原始数据，生成一个详细的操作报告，描述用户在界面上的操作序列
@@ -90,43 +93,63 @@ function generateOperationReport(rawData, actionsText) {
     `;
 }
 
+/**
+ * 异步下载当前标签页的屏幕截图
+ * 此函数首先捕获当前可见标签页的截图，然后生成一个带有时间戳的文件名，
+ * 最后使用chrome.downloads API下载截图到本地
+ */
+async function downloadScreenshot() {
+  // 捕获当前可见标签页的截图，返回截图的data URL
+  const screenshotUrl = await chrome.tabs.captureVisibleTab(null, {format: 'png'});
+
+  // 生成当前时间的时间戳，用于唯一的文件名
+  const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+
+  // 使用chrome.downloads API下载截图
+  // 文件名结合了固定的前缀和时间戳，确保每个截图文件名都是唯一的
+  chrome.downloads.download({
+    url: screenshotUrl,
+    filename: `screenshot-${timestamp}.png`
+  });
+}
+
 // 监听消息
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-  if (request.action === 'captureAndDownload') {
-    // 截图
-    chrome.tabs.captureVisibleTab(null, {format: 'png'}, function (screenshotUrl) {
-      // 生成时间戳
-      const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-
-      // 下载截图
-      chrome.downloads.download({
-        url: screenshotUrl,
-        filename: `screenshot-${timestamp}.png`
+  switch (request.action) {
+    case 'showLog':
+      console.log('message.log::', request.message);
+      break;
+    case 'getActions':
+      const storageKey = getActionsKey();
+      chrome.storage.local.get([storageKey], function (result) {
+        const actions = result[storageKey] || [];
+        sendResponse({
+          actions: actions,
+          key: storageKey,
+        });
       });
-
+      break;
+    case 'captureAndDownload':
+      downloadScreenshot();
       // 创建操作记录文本内容
       const actionsText = JSON.stringify(request.actions, null, 2);
       const reportText = generateOperationReport(request.actions, actionsText);
-
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
       // 创建 Data URL
       const dataUrl = 'data:text/plain;charset=utf-8,' + encodeURIComponent(reportText);
-
       // 下载操作记录文件
       chrome.downloads.download({
         url: dataUrl,
         filename: `分析报告-${timestamp}.txt`,
         saveAs: false
       });
-
-
       // 清除之前的操作记录
       chrome.storage.local.remove(request.key, function () {
         console.log('Previous actions cleared');
       });
-    });
-  }
-  if (request.action === 'showLog') {
-    console.log('message.log::', request.message);
+      break;
+    case 'storageError':
+      break;
   }
   return true;
 });

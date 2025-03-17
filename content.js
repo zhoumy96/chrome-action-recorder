@@ -1,16 +1,6 @@
 // 用于存储用户操作的数组
 const MAX_ACTIONS = 100; // 每个标签页最多保存100个操作
-
-// 获取存储键名
-function getStorageKey() {
-  const location = window.location;
-  // // 处理iframe
-  // if (location?.ancestorOrigins[0]) {
-  //     const url = location?.ancestorOrigins[0];
-  //     const parsedUrl = new URL(url);
-  //     const hostname = parsedUrl.hostname;
-  //     return 'userActions_' + hostname;
-  // }
+function getActionsKey() {
   return 'userActions_' + window.location.host;
 }
 
@@ -42,7 +32,7 @@ function recordAction(event) {
     }
 
     // 获取当前标签页的操作记录
-    const storageKey = getStorageKey();
+    const storageKey = getActionsKey();
     chrome.storage.local.get([storageKey], function (result) {
       let currentActions = result[storageKey] || [];
 
@@ -109,20 +99,5 @@ document.addEventListener('DOMContentLoaded', () => {
   if (!document.hasEventListeners) {
     addEventListeners();
     document.hasEventListeners = true;
-  }
-});
-
-// 监听来自popup的消息
-chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-  if (request.action === 'getActions') {
-    const storageKey = getStorageKey();
-    chrome.storage.local.get([storageKey], function (result) {
-      const actions = result[storageKey] || [];
-      sendResponse({
-        actions: actions,
-        key: storageKey,
-      });
-    });
-    return true;
   }
 });

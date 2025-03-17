@@ -76,19 +76,18 @@ document.getElementById('avayaButton').addEventListener('click', async () => {
 });
 document.getElementById('urlButton').addEventListener('click', async () => {
   try {
-    const {errorUrls} = await chrome.storage.local.get('errorUrls');
 
-    if (errorUrls?.length) {
-      const blob = new Blob([errorUrls.join('\n')], {type: 'text/plain'});
-      const url = URL.createObjectURL(blob);
 
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `error_urls_${Date.now()}.txt`;
-      a.click();
-
-      URL.revokeObjectURL(url);
-      chrome.storage.local.set({errorUrls: []}); // 清空记录
+  } catch (error) {
+    console.error('扩展错误:', error.message);
+  }
+});
+document.getElementById('storageButton').addEventListener('click', async () => {
+  try {
+    const [tab] = await chrome.tabs.query({active: true, currentWindow: true});
+    if (!tab?.id) {
+      console.log('未找到活动标签页');
+      return;
     }
 
   } catch (error) {
