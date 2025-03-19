@@ -1,3 +1,4 @@
+// 捕获最近操作和截图
 document.getElementById('captureButton').addEventListener('click', async () => {
   const statusDiv = document.getElementById('status');
   statusDiv.textContent = '正在捕获...';
@@ -34,6 +35,7 @@ document.getElementById('captureButton').addEventListener('click', async () => {
     statusDiv.textContent = '发生错误：' + error.message;
   }
 });
+// 下载Avaya日志
 document.getElementById('avayaButton').addEventListener('click', async () => {
   try {
     const [tab] = await chrome.tabs.query({active: true, currentWindow: true});
@@ -74,14 +76,7 @@ document.getElementById('avayaButton').addEventListener('click', async () => {
     console.error('扩展错误:', error.message);
   }
 });
-document.getElementById('urlButton').addEventListener('click', async () => {
-  try {
-
-
-  } catch (error) {
-    console.error('扩展错误:', error.message);
-  }
-});
+// 下载Storage错误日志
 document.getElementById('storageButton').addEventListener('click', async () => {
   try {
     const [tab] = await chrome.tabs.query({active: true, currentWindow: true});
