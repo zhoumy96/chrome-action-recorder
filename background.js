@@ -91,6 +91,58 @@ const DownloadManager = {
   }
 };
 
+// Storage模块
+const StorageManager = {
+  // 通用方法：计算指定存储类型中某个键的大小
+  getStorageSizeMB(storage, key) {
+    const value = storage.getItem(key);
+    // 计算 Key 和 Value 的总字节数（UTF-16 编码下每个字符占2字节）
+    const byteSize =
+      JSON.stringify(key).length * 2 +
+      JSON.stringify(value).length * 2;
+    // 转换为 MB 并保留两位小数
+    return parseFloat((byteSize / (1024 * 1024)).toFixed(2));
+  },
+
+  // 通用方法：获取指定存储类型的所有键值大小
+  getAllStorageSizes(storage) {
+    const result = {};
+    for (let i = 0; i < storage.length; i++) {
+      const key = storage.key(i);
+      result[key] = this.getStorageSizeMB(storage, key);
+    }
+    return result;
+  },
+
+  // 获取 sessionStorage 所有内容大小
+  getAllSessionStorageSizes() {
+    return this.getAllStorageSizes(sessionStorage);
+  },
+
+  // 获取 localStorage 所有内容大小
+  getAllLocalStorageSizes() {
+    return this.getAllStorageSizes(localStorage);
+  },
+
+  // 同时获取两种存储的所有内容大小
+  getAllStoragesSizes() {
+    return {
+      sessionStorage: this.getAllSessionStorageSizes(),
+      localStorage: this.getAllLocalStorageSizes()
+    };
+  },
+
+  formatReport(errorText, storageText) {
+    return [
+      '=== Storage错误报告 ===',
+      errorText.join('\n'),
+      '=== 报告结束 ===',
+      '=== 所有Storage大小数据 ===',
+      storageText
+    ].join('\n');
+  }
+};
+
 // 消息处理器
 const MessageHandler = {
   getActions: (host, sendResponse) => {
@@ -105,7 +157,7 @@ const MessageHandler = {
 
   handleDownloadActions: async (request) => {
     await DownloadManager.screenshot();
-    const rawText = JSON.stringify(request.value, null, 2);
+    const rawText = JSON.stringify(request.value);
     const processedData = ReportGenerator.processEvents(request.value);
     const descriptions = ReportGenerator.generateDescriptions(processedData);
     const report = ReportGenerator.formatReport(descriptions, rawText);
@@ -126,7 +178,10 @@ const MessageHandler = {
 
   handleDownloadStorageErrors: async (request) => {
     await DownloadManager.screenshot();
-    DownloadManager.textFile(JSON.stringify(request.value), 'Storage错误报告');
+    const errorText = JSON.stringify(request.value);
+    const storageText = StorageManager.getAllStoragesSizes();
+    const report = StorageManager.formatReport(errorText, storageText);
+    DownloadManager.textFile(report, 'Storage错误报告');
   },
 };
 

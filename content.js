@@ -1,8 +1,7 @@
 class UserActionRecorder {
   static MAX_ACTIONS = 100;
   static EVENTS = ['click', 'input', 'change', 'submit'];
-  static STORAGE_KEY = `storage_${window.location.host}`;
-  static STORAGE_KEY_ACTIONS = `storage_${window.location.host}_actions`;
+
   constructor() {
     this.hasEventListeners = false;
     this.boundHandleEvent = this.handleEvent.bind(this);
