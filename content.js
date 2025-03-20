@@ -1,15 +1,21 @@
 class UserActionRecorder {
   static MAX_ACTIONS = 100;
   static EVENTS = ['click', 'input', 'change', 'submit'];
-
+  static STORAGE_KEY = `storage_${window.location.host}`;
+  static STORAGE_KEY_ACTIONS = `storage_${window.location.host}_actions`;
   constructor() {
     this.hasEventListeners = false;
     this.boundHandleEvent = this.handleEvent.bind(this);
     this.initialize();
+    this.wrapStorage(localStorage, 'localstorage');
+    this.wrapStorage(sessionStorage, 'sessionStorage');
   }
 
   getStorageKey() {
-    return `userActions_${window.location.host}`;
+    return `storage_${window.location.host}`;
+  }
+  getActionsKey() {
+    return `storage_${window.location.host}_actions`;
   }
 
   initialize() {
@@ -105,16 +111,72 @@ class UserActionRecorder {
 
   // 保存到chrome.storage
   saveToStorage(action) {
-    const storageKey = this.getStorageKey();
+    const storageKey = this.getActionsKey();
 
     chrome.storage.local.get([storageKey], result => {
       const currentActions = result[storageKey] || [];
       const updatedActions = [...currentActions, action].slice(-UserActionRecorder.MAX_ACTIONS);
 
       chrome.storage.local.set({ [storageKey]: updatedActions }, () => {
+        console.log(`Actions saved for ${window.location.host}, total: ${updatedActions.length}`);
+      });
+    });
+  }
+
+  // 重写Storage方法
+  wrapStorage(storage, type) {
+    const self = this;
+    const originalSetItem = storage.setItem;
+    const originalRemoveItem = storage.removeItem;
+    const originalClear = storage.clear;
+    storage.setItem = function(key, value) {
+      try {
+        originalSetItem.call(this, key, value);
+      } catch (e) {
+        self.handleStorageError(e, type, { key, value });
+      }
+    };
+
+    storage.removeItem = function(key) {
+      try {
+        originalRemoveItem.call(this, key);
+      } catch (e) {
+        self.handleStorageError(e, type, { key });
+      }
+    };
+
+    storage.clear = function() {
+      try {
+        originalClear.call(this);
+      } catch (e) {
+        self.handleStorageError(e, type);
+      }
+    };
+  }
+
+  handleStorageError(error, storageType, details = {}) {
+    const errorInfo = {
+      // type: 'storageError',
+      storageType,
+      error: {
+        name: error.name,
+        message: error.message,
+        ...details
+      },
+      timestamp: new Date().toISOString()
+    };
+
+    const storageKey = this.getStorageKey();
+
+    chrome.storage.local.get([storageKey], result => {
+      const currentErrorInfos = result[storageKey] || [];
+      const updatedErrorInfos = [...currentErrorInfos, errorInfo];
+
+      chrome.storage.local.set({ [storageKey]: updatedErrorInfos }, () => {
         // console.log(`Actions saved for ${window.location.host}, total: ${updatedActions.length}`);
       });
     });
+    console.error('Storage Error:', errorInfo);
   }
 }
 

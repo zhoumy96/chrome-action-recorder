@@ -1,8 +1,12 @@
-const errorUrls = new Set();
 // 获取存储键名
-function getActionsKey() {
-  return 'userActions_' + window.location.host;
+function getStorageKey() {
+  return `storage_${window.location.host}`;
 }
+function getActionsKey() {
+  return `storage_${window.location.host}_actions`;
+}
+// const STORAGE_KEY = `storage_${window.location.host}`;
+// const STORAGE_KEY_ACTIONS = `storage_${window.location.host}_actions`;
 /**
  * 生成操作分析报告
  * 该函数处理给定的原始数据，生成一个详细的操作报告，描述用户在界面上的操作序列
@@ -115,31 +119,33 @@ async function downloadScreenshot() {
 
 // 监听消息
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+  const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+  const host = request?.host;
   switch (request.action) {
     case 'showLog':
       console.log('message.log::', request.message);
       break;
     case 'getActions':
-      const storageKey = getActionsKey();
-      chrome.storage.local.get([storageKey], function (result) {
-        const actions = result[storageKey] || [];
+      const storageKeyActions = `storage_${host}_actions`;
+      chrome.storage.local.get([storageKeyActions], function (result) {
+        const value = result[storageKeyActions] || [];
+        console.log('value::', value);
         sendResponse({
-          actions: actions,
-          key: storageKey,
+          value,
+          key: storageKeyActions,
         });
       });
       break;
-    case 'captureAndDownload':
+    case 'downloadActions':
       downloadScreenshot();
       // 创建操作记录文本内容
-      const actionsText = JSON.stringify(request.actions, null, 2);
-      const reportText = generateOperationReport(request.actions, actionsText);
-      const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+      const actionsText = JSON.stringify(request.value, null, 2);
+      const reportText = generateOperationReport(request.value, actionsText);
       // 创建 Data URL
-      const dataUrl = 'data:text/plain;charset=utf-8,' + encodeURIComponent(reportText);
+      const actionsUrl = 'data:text/plain;charset=utf-8,' + encodeURIComponent(reportText);
       // 下载操作记录文件
       chrome.downloads.download({
-        url: dataUrl,
+        url: actionsUrl,
         filename: `分析报告-${timestamp}.txt`,
         saveAs: false
       });
@@ -148,7 +154,27 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         console.log('Previous actions cleared');
       });
       break;
-    case 'storageError':
+    case 'getStorageError':
+      const storageKey = `storage_${host}`;
+      chrome.storage.local.get([storageKey], function (result) {
+        const value = result[storageKey] || [];
+        sendResponse({
+          value,
+          key: storageKey,
+        });
+      });
+      break;
+    case 'downloadStorageError':
+      // 创建操作记录文本内容
+      const storageText = JSON.stringify(request.value, null, 2);
+      // 创建 Data URL
+      const storageUrl = 'data:text/plain;charset=utf-8,' + encodeURIComponent(storageText);
+      // 下载操作记录文件
+      chrome.downloads.download({
+        url: storageUrl,
+        filename: `Storage错误报告-${timestamp}.txt`,
+        saveAs: false
+      });
       break;
   }
   return true;
