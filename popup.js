@@ -1,120 +1,171 @@
-// 捕获最近操作和截图
-document.getElementById('captureButton').addEventListener('click', async () => {
-  const statusDiv = document.getElementById('status');
-  statusDiv.textContent = '正在捕获...';
+// 公共工具方法
+const utils = {
+  // 获取当前活动标签页
+  fetchCurrentTab: async () => {
+    const [tab] = await chrome.tabs.query({
+      active: true,
+      currentWindow: true
+    });
+    return tab?.id ? tab : Promise.reject('未找到活动标签页');
+  },
 
-  try {
-    // 获取当前标签页
-    const [tab] = await chrome.tabs.query({active: true, currentWindow: true});
+  // 获取当前域名
+  getCurrentHost: async () => {
+    const tab = await utils.fetchCurrentTab();
+    return new URL(tab.url).host;
+  },
 
-    if (!tab) {
-      console.log('无法获取当前标签页');
-      return;
+  // 统一更新状态
+  updateStatus: (element, text, isError = false) => {
+    element.textContent = text;
+    if (isError) {
+      element.style.color = '#dc3545';
+    } else {
+      element.style.color = '';
     }
-    const host = new URL(tab.url).host;
-    const response = await chrome.runtime.sendMessage({ action: 'getActions', host });
+  },
 
-    if (response && response.value) {
-      if (response.value.length === 0) {
-        statusDiv.textContent = '未检测到任何操作记录';
+  // 统一错误处理
+  handleError: (error, statusElement) => {
+    console.error('[ERROR]', error);
+    utils.updateStatus(statusElement, `发生错误：${error.message}`, true);
+    chrome.runtime.sendMessage({
+      action: 'showLog',
+      message: error.stack || error.toString()
+    });
+  }
+};
+
+// 通用操作处理器
+const actionHandler = {
+  // 通用数据获取方法
+  fetchData: async (actionType) => {
+    const host = await utils.getCurrentHost();
+    const response = await chrome.runtime.sendMessage({
+      action: actionType,
+      host
+    });
+
+    if (!response?.value) {
+      throw new Error('未能获取有效响应数据');
+    }
+
+    return {
+      data: response.value,
+      storageKey: response.key
+    };
+  },
+
+  // 通用下载处理器
+  handleDownload: (params, statusElement) => {
+    chrome.runtime.sendMessage({
+      action: params.action,
+      value: params.data,
+      key: params.storageKey
+    });
+
+    utils.updateStatus(
+      statusElement,
+      `共记录 ${params.data.length} 条${params.type}，文件开始下载`
+    );
+  }
+};
+
+// 事件监听器初始化
+function initListeners() {
+  const statusDiv = document.getElementById('status');
+
+  // 捕获操作事件
+  document.getElementById('captureButton').addEventListener('click', async () => {
+    try {
+      utils.updateStatus(statusDiv, '正在捕获操作记录...');
+
+      const { data, storageKey } = await actionHandler.fetchData('getActions');
+
+      if (data.length === 0) {
+        utils.updateStatus(statusDiv, '未检测到任何操作记录');
         return;
       }
 
-      // 发送消息给background script进行截图和下载
-      chrome.runtime.sendMessage({
-          action: "downloadActions",
-          value: response.value,
-          key: response.key,
+      actionHandler.handleDownload({
+        action: 'downloadActions',
+        data,
+        storageKey,
+        type: '操作记录'
+      }, statusDiv);
+
+    } catch (error) {
+      utils.handleError(error, statusDiv);
+    }
+  });
+
+  // Avaya 日志下载
+  document.getElementById('avayaButton').addEventListener('click', async () => {
+    try {
+      utils.updateStatus(statusDiv, '正在获取Avaya日志...');
+
+      const tab = await utils.fetchCurrentTab();
+      const checkResult = await chrome.scripting.executeScript({
+        target: { tabId: tab.id },
+        world: 'MAIN',
+        func: () => ({
+          exists: typeof window.myDBExport === 'function',
+          isAvailable: 'myDBExport' in window
+        })
       });
 
-      statusDiv.textContent = `捕获完成！共记录了 ${response.value.length} 个操作，文件已开始下载。`;
+      if (!checkResult[0]?.result?.exists) {
+        throw new Error('myDBExport 函数不可用');
+      }
 
-    } else {
-      statusDiv.textContent = '未能获取操作记录';
-    }
-  } catch (error) {
-    chrome.runtime.sendMessage({ action: 'showLog', message:  error.message});
-    statusDiv.textContent = '发生错误：' + error.message;
-  }
-});
-// 下载Avaya日志
-document.getElementById('avayaButton').addEventListener('click', async () => {
-  const statusDiv = document.getElementById('status');
-  try {
-    const [tab] = await chrome.tabs.query({active: true, currentWindow: true});
-    if (!tab?.id) {
-      console.log('未找到活动标签页');
-      return;
-    }
-
-    // 先检查函数是否存在
-    const checkResult = await chrome.scripting.executeScript({
-      target: {tabId: tab.id}, world: 'MAIN', // 主环境
-      func: () => typeof window.myDBExport === 'function'
-    });
-
-    if (!checkResult[0]?.result) {
-      // chrome.runtime.sendMessage({ action: 'showLog', message: 'myDBExport 未定义或不是函数'});
-      console.log('myDBExport 未定义或不是函数');
-      statusDiv.textContent = 'myDBExport 未定义或不是函数';
-      return;
-    }
-
-    // 实际调用
-    const execResult = await chrome.scripting.executeScript({
-      target: {tabId: tab.id}, world: 'MAIN', args: ['avaya'], func: (param) => {
-        try {
-          return window.myDBExport(param);
-        } catch (e) {
-          return {error: e.message};
+      const execResult = await chrome.scripting.executeScript({
+        target: { tabId: tab.id },
+        world: 'MAIN',
+        args: ['avaya'],
+        func: (param) => {
+          try {
+            return window.myDBExport(param);
+          } catch (e) {
+            throw new Error(`函数执行失败: ${e.message}`);
+          }
         }
+      });
+
+      if (execResult[0]?.result?.error) {
+        throw new Error(execResult[0].result.error);
       }
-    });
 
-    if (execResult[0]?.result?.error) {
-      console.error('函数执行错误:', execResult[0].result.error);
-    } else {
-      console.log('成功结果:', execResult[0]?.result);
-    }
-  } catch (error) {
-    statusDiv.textContent = '发生错误：' + error.message;
-    console.error('扩展错误:', error.message);
-  }
-});
-// 下载Storage错误日志
-document.getElementById('storageButton').addEventListener('click', async () => {
-  const statusDiv = document.getElementById('status');
-  statusDiv.textContent = '正在捕获...';
-  try {
-    const [tab] = await chrome.tabs.query({active: true, currentWindow: true});
-    if (!tab?.id) {
-      console.log('未找到活动标签页');
-      return;
-    }
-    const host = new URL(tab.url).host;
-    const response = await chrome.runtime.sendMessage({ action: 'getStorageError', host });
+      utils.updateStatus(statusDiv, 'Avaya日志下载成功');
 
-    if (response && response.value) {
-      if (response.value.length === 0) {
-        statusDiv.textContent = '未检测到任何错误记录';
+    } catch (error) {
+      utils.handleError(error, statusDiv);
+    }
+  });
+
+  // 存储错误日志下载
+  document.getElementById('storageButton').addEventListener('click', async () => {
+    try {
+      utils.updateStatus(statusDiv, '正在获取存储错误...');
+
+      const { data, storageKey } = await actionHandler.fetchData('getStorageError');
+
+      if (data.length === 0) {
+        utils.updateStatus(statusDiv, '未检测到错误记录');
         return;
       }
 
-      // 发送消息给background script进行截图和下载
-      chrome.runtime.sendMessage({
-        action: "downloadStorageError",
-        value: response.value,
-        key: response.key,
-      });
+      actionHandler.handleDownload({
+        action: 'downloadStorageError',
+        data,
+        storageKey,
+        type: '错误记录'
+      }, statusDiv);
 
-      statusDiv.textContent = `共记录了 ${response.value.length} 个错误记录，文件已开始下载。`;
-
-    } else {
-      statusDiv.textContent = '未能获取错误记录';
+    } catch (error) {
+      utils.handleError(error, statusDiv);
     }
+  });
+}
 
-  } catch (error) {
-    console.error('扩展错误:', error.message);
-    statusDiv.textContent = '发生错误：' + error.message;
-  }
-});
+// 初始化执行
+document.addEventListener('DOMContentLoaded', initListeners);

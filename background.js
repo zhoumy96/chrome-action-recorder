@@ -1,181 +1,165 @@
-// 获取存储键名
-function getStorageKey() {
-  return `storage_${window.location.host}`;
-}
-function getActionsKey() {
-  return `storage_${window.location.host}_actions`;
-}
-// const STORAGE_KEY = `storage_${window.location.host}`;
-// const STORAGE_KEY_ACTIONS = `storage_${window.location.host}_actions`;
-/**
- * 生成操作分析报告
- * 该函数处理给定的原始数据，生成一个详细的操作报告，描述用户在界面上的操作序列
- *
- * @param {Array} rawData - 包含用户操作原始数据的数组，每个元素代表一个操作事件
- * @param {String} actionsText - 原始数据的文本表示，用于在报告末尾显示
- * @returns {String} - 返回一个字符串，包含操作分析报告和原始数据文本
- */
-function generateOperationReport(rawData, actionsText) {
-  // 预处理：按时间排序 + 合并连续输入事件
-  // 这一步是为了确保事件按时间顺序处理，并且合并连续的输入事件以避免重复报告
-  const processedData = rawData
-    .sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp))
-    .reduce((acc, curr) => {
+// 常量定义
+const STORAGE_PREFIX = 'storage_';
+const getStorageKey = (host, suffix = '') => `${STORAGE_PREFIX}${host}${suffix}`;
+
+// 工具函数
+const generateTimestamp = () => new Date().toISOString().replace(/[:.]/g, '-');
+
+// 报告生成模块
+const ReportGenerator = {
+  processEvents: (rawData) => {
+    const sortedData = rawData.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+
+    return sortedData.reduce((acc, curr) => {
       const last = acc[acc.length - 1];
 
-      // 合并连续输入
-      // 当前后两个事件都是输入事件且针对同一目标时，用当前事件的值更新最后一个事件的值
-      if (last?.type === 'input' &&
-        curr.type === 'input' &&
-        last.target.id === curr.target.id) {
+      // 合并连续输入事件
+      if (last?.type === 'input' && curr.type === 'input' && last.target.id === curr.target.id) {
         last.value = curr.value;
         return acc;
       }
 
-      // 合并change事件
-      // 当一个输入事件后面紧跟一个change事件且它们针对同一目标时，标记最后一个事件为确认
-      if (last?.type === 'input' &&
-        curr.type === 'change' &&
-        last.target.id === curr.target.id) {
+      // 标记确认的change事件
+      if (last?.type === 'input' && curr.type === 'change' && last.target.id === curr.target.id) {
         last.isConfirmed = true;
         return acc;
       }
 
-      // 将当前事件添加到累积数组中，初始状态为未确认
-      acc.push({...curr, isConfirmed: false});
-      return acc;
+      return [...acc, { ...curr, isConfirmed: false }];
     }, []);
+  },
 
-  // 生成描述
-  // 遍历处理后的数据，生成每个事件的描述性文本
-  const descriptions = [];
+  generateDescriptions: (processedData) => {
+    return processedData.map(event => {
+      const time = event.timestamp.split(' ')[1];
+      const { target } = event;
 
-  processedData.forEach(event => {
-    const time = event.timestamp.split(' ')[1];
-    const target = event.target;
+      switch (event.type) {
+        case 'input':
+        case 'change':
+          const status = event.isConfirmed ? '完成输入' : '正在输入';
+          return `[${time}] ${status}「${target.id}」值：${event.value}`;
 
-    // 输入事件处理
-    // 对于输入和change事件，根据事件是否被确认，生成相应的描述文本
-    if (['input', 'change'].includes(event.type)) {
-      const status = event.isConfirmed ? '完成输入' : '正在输入';
-      descriptions.push(
-        `[${time}] ${status}「${target.id}」值：${event.value}`
-      );
-      return;
-    }
+        case 'click':
+          let desc = target.innerText?.trim() || `点击「${target.id}」`;
+          if (target.tagName === 'A') desc = `点击切换到「${target.innerText.trim()}」`;
+          return `[${time}] ${desc} (位置 X:${event.x}, Y:${event.y})`;
 
-    // 点击事件处理
-    // 对于点击事件，生成描述文本，优先使用元素的innerText，并根据情况添加坐标信息
-    if (event.type === 'click') {
-      let desc = `点击「${target.id}」`;
-
-      // 优先使用元素文本
-      if (target.innerText?.trim()) {
-        desc = `点击「${target.innerText.trim()}」`;
+        default:
+          return `[${time}] 未识别操作类型：${event.type}`;
       }
+    });
+  },
 
-      // 如果是链接跳转
-      if (target.tagName === 'A') {
-        desc = `点击切换到「${target.innerText.trim()}」`;
-      }
+  formatReport: (descriptions, rawText) => {
+    return [
+      '=== 操作分析报告 ===',
+      '操作记录：',
+      descriptions.join('\n'),
+      '=== 报告结束 ===',
+      '=== 原始数据 ===',
+      rawText
+    ].join('\n');
+  }
+};
 
-      // 添加坐标信息
-      desc += ` (位置 X:${event.x}, Y:${event.y})`;
-
-      descriptions.push(`[${time}] ${desc}`);
-    }
-  });
-
-  // 返回操作分析报告，包含操作记录和原始数据文本
-  return `
-  === 操作分析报告 ===
-  操作记录：
-  ${descriptions.join('\n')}
-  === 报告结束 ===
-  === 原始数据 ===
-  ${actionsText}
-    `;
-}
-
-/**
- * 异步下载当前标签页的屏幕截图
- * 此函数首先捕获当前可见标签页的截图，然后生成一个带有时间戳的文件名，
- * 最后使用chrome.downloads API下载截图到本地
- */
-async function downloadScreenshot() {
-  // 捕获当前可见标签页的截图，返回截图的data URL
-  const screenshotUrl = await chrome.tabs.captureVisibleTab(null, {format: 'png'});
-
-  // 生成当前时间的时间戳，用于唯一的文件名
-  const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-
-  // 使用chrome.downloads API下载截图
-  // 文件名结合了固定的前缀和时间戳，确保每个截图文件名都是唯一的
-  chrome.downloads.download({
-    url: screenshotUrl,
-    filename: `screenshot-${timestamp}.png`
-  });
-}
-
-// 监听消息
-chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-  const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-  const host = request?.host;
-  switch (request.action) {
-    case 'showLog':
-      console.log('message.log::', request.message);
-      break;
-    case 'getActions':
-      const storageKeyActions = `storage_${host}_actions`;
-      chrome.storage.local.get([storageKeyActions], function (result) {
-        const value = result[storageKeyActions] || [];
-        console.log('value::', value);
-        sendResponse({
-          value,
-          key: storageKeyActions,
-        });
-      });
-      break;
-    case 'downloadActions':
-      downloadScreenshot();
-      // 创建操作记录文本内容
-      const actionsText = JSON.stringify(request.value, null, 2);
-      const reportText = generateOperationReport(request.value, actionsText);
-      // 创建 Data URL
-      const actionsUrl = 'data:text/plain;charset=utf-8,' + encodeURIComponent(reportText);
-      // 下载操作记录文件
+// 下载模块
+const DownloadManager = {
+  async screenshot() {
+    try {
+      const screenshotUrl = await chrome.tabs.captureVisibleTab(null, { format: 'png' });
       chrome.downloads.download({
-        url: actionsUrl,
-        filename: `分析报告-${timestamp}.txt`,
+        url: screenshotUrl,
+        filename: `screenshot-${generateTimestamp()}.png`
+      });
+    } catch (error) {
+      console.error('截图下载失败:', error);
+    }
+  },
+
+  textFile(content, filenamePrefix) {
+    try {
+      const dataUrl = `data:text/plain;charset=utf-8,${encodeURIComponent(content)}`;
+      chrome.downloads.download({
+        url: dataUrl,
+        filename: `${filenamePrefix}-${generateTimestamp()}.txt`,
         saveAs: false
       });
-      // 清除之前的操作记录
-      chrome.storage.local.remove(request.key, function () {
-        console.log('Previous actions cleared');
+    } catch (error) {
+      console.error('文件生成失败:', error);
+    }
+  }
+};
+
+// 消息处理器
+const MessageHandler = {
+  getActions: (host, sendResponse) => {
+    const storageKey = getStorageKey(host, '_actions');
+    chrome.storage.local.get([storageKey], result => {
+      sendResponse({
+        value: result[storageKey] || [],
+        key: storageKey
       });
-      break;
-    case 'getStorageError':
-      const storageKey = `storage_${host}`;
-      chrome.storage.local.get([storageKey], function (result) {
-        const value = result[storageKey] || [];
-        sendResponse({
-          value,
-          key: storageKey,
-        });
+    });
+  },
+
+  handleDownloadActions: async (request) => {
+    await DownloadManager.screenshot();
+    const rawText = JSON.stringify(request.value, null, 2);
+    const processedData = ReportGenerator.processEvents(request.value);
+    const descriptions = ReportGenerator.generateDescriptions(processedData);
+    const report = ReportGenerator.formatReport(descriptions, rawText);
+
+    DownloadManager.textFile(report, '分析报告');
+    chrome.storage.local.remove(request.key);
+  },
+
+  getStorageErrors: (host, sendResponse) => {
+    const storageKey = getStorageKey(host);
+    chrome.storage.local.get([storageKey], result => {
+      sendResponse({
+        value: result[storageKey] || [],
+        key: storageKey
       });
-      break;
-    case 'downloadStorageError':
-      // 创建操作记录文本内容
-      const storageText = JSON.stringify(request.value, null, 2);
-      // 创建 Data URL
-      const storageUrl = 'data:text/plain;charset=utf-8,' + encodeURIComponent(storageText);
-      // 下载操作记录文件
-      chrome.downloads.download({
-        url: storageUrl,
-        filename: `Storage错误报告-${timestamp}.txt`,
-        saveAs: false
-      });
-      break;
+    });
+  },
+
+  handleDownloadStorageErrors: async (request) => {
+    await DownloadManager.screenshot();
+    DownloadManager.textFile(JSON.stringify(request.value), 'Storage错误报告');
+  },
+};
+
+// 主消息监听
+chrome.runtime.onMessage.addListener((request, _, sendResponse) => {
+  try {
+    const host = request?.host;
+    const action = request.action;
+
+    switch (action) {
+      case 'getActions':
+        MessageHandler.getActions(host, sendResponse);
+        return true; // 保持异步响应
+
+      case 'downloadActions':
+        MessageHandler.handleDownloadActions(request);
+        break;
+
+      case 'getStorageError':
+        MessageHandler.getStorageErrors(host, sendResponse);
+        return true;
+
+      case 'downloadStorageError':
+        MessageHandler.handleDownloadStorageErrors(request);
+        break;
+
+      case 'showLog':
+        console.log('[EXTENSION LOG]', request.message);
+        break;
+    }
+  } catch (error) {
+    console.error('[消息处理异常]', error);
+    sendResponse({ error: error.message });
   }
   return true;
 });
