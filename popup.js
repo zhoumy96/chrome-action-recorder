@@ -27,7 +27,6 @@ const utils = {
 
   // 统一错误处理
   handleError: (error, statusElement) => {
-    console.error('[ERROR]', error);
     utils.updateStatus(statusElement, `发生错误：${error.message}`, true);
     chrome.runtime.sendMessage({
       action: 'showLog',
@@ -39,11 +38,12 @@ const utils = {
 // 通用操作处理器
 const actionHandler = {
   // 通用数据获取方法
-  fetchData: async (actionType) => {
+  fetchData: async (suffix = '') => {
     const host = await utils.getCurrentHost();
     const response = await chrome.runtime.sendMessage({
-      action: actionType,
-      host
+      action: 'getErrorData',
+      host,
+      suffix
     });
 
     if (!response?.value) {
@@ -80,7 +80,7 @@ function initListeners() {
     try {
       utils.updateStatus(statusDiv, '正在捕获操作记录...');
 
-      const { data, storageKey } = await actionHandler.fetchData('getActions');
+      const { data, storageKey } = await actionHandler.fetchData( '_actions');
 
       if (data.length === 0) {
         utils.updateStatus(statusDiv, '未检测到任何操作记录');
@@ -147,7 +147,7 @@ function initListeners() {
     try {
       utils.updateStatus(statusDiv, '正在获取存储错误...');
 
-      const { data, storageKey } = await actionHandler.fetchData('getStorageError');
+      const { data, storageKey } = await actionHandler.fetchData();
 
       if (data.length === 0) {
         utils.updateStatus(statusDiv, '未检测到错误记录');
@@ -156,6 +156,30 @@ function initListeners() {
 
       actionHandler.handleDownload({
         action: 'downloadStorageError',
+        data,
+        storageKey,
+        type: '错误记录'
+      }, statusDiv);
+
+    } catch (error) {
+      utils.handleError(error, statusDiv);
+    }
+  });
+
+  // 错误网络请求下载
+  document.getElementById('urlButton').addEventListener('click', async () => {
+    try {
+      utils.updateStatus(statusDiv, '正在获取错误网络请求...');
+
+      const { data, storageKey } = await actionHandler.fetchData('_request');
+
+      if (data.length === 0) {
+        utils.updateStatus(statusDiv, '未检测到错误记录');
+        return;
+      }
+
+      actionHandler.handleDownload({
+        action: 'downloadErrorRequest',
         data,
         storageKey,
         type: '错误记录'

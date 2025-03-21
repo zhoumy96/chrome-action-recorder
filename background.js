@@ -1,5 +1,7 @@
 // 常量定义
 const STORAGE_PREFIX = 'storage_';
+// 错误网络请求
+const errorRequests = new Set();
 const getStorageKey = (host, suffix = '') => `${STORAGE_PREFIX}${host}${suffix}`;
 
 // 工具函数
@@ -162,8 +164,9 @@ const StorageManager = {
 
 // 消息处理器
 const MessageHandler = {
-  getActions: (host, sendResponse) => {
-    const storageKey = getStorageKey(host, '_actions');
+  // 统一获取错误数据
+  getErrorData: (host, suffix, sendResponse) => {
+    const storageKey = getStorageKey(host, suffix);
     chrome.storage.local.get([storageKey], result => {
       sendResponse({
         value: result[storageKey] || [],
@@ -183,16 +186,6 @@ const MessageHandler = {
     chrome.storage.local.remove(request.key);
   },
 
-  getStorageErrors: (host, sendResponse) => {
-    const storageKey = getStorageKey(host);
-    chrome.storage.local.get([storageKey], result => {
-      sendResponse({
-        value: result[storageKey] || [],
-        key: storageKey
-      });
-    });
-  },
-
   handleDownloadStorageErrors: async (request) => {
     await DownloadManager.screenshot();
     const errorText = JSON.stringify(request.value);
@@ -201,29 +194,39 @@ const MessageHandler = {
     DownloadManager.textFile(report, 'Storage错误报告');
     chrome.storage.local.remove(request.key);
   },
+
+  handleDownloadErrorRequest: async (request) => {
+    await DownloadManager.screenshot();
+    const errorText = JSON.stringify(request.value);
+    DownloadManager.textFile(errorText, '网络请求错误报告');
+    chrome.storage.local.remove(request.key);
+    errorRequests?.clear();
+  },
+
 };
 
 // 主消息监听
 chrome.runtime.onMessage.addListener((request, _, sendResponse) => {
   try {
-    const host = request?.host;
     const action = request.action;
+    const host = request?.host;
+    const suffix = request?.suffix;
 
     switch (action) {
-      case 'getActions':
-        MessageHandler.getActions(host, sendResponse);
-        return true; // 保持异步响应
+      case 'getErrorData':
+        MessageHandler.getErrorData(host, suffix, sendResponse);
+        return true;
 
       case 'downloadActions':
         MessageHandler.handleDownloadActions(request);
         break;
 
-      case 'getStorageError':
-        MessageHandler.getStorageErrors(host, sendResponse);
-        return true;
-
       case 'downloadStorageError':
         MessageHandler.handleDownloadStorageErrors(request);
+        break;
+
+      case 'downloadErrorRequest':
+        MessageHandler.handleDownloadErrorRequest(request);
         break;
 
       case 'showLog':

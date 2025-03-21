@@ -33,7 +33,7 @@ class UserActionRecorder {
   }
 
   handleExtensionMessage(event) {
-    if (event.source !== window || !event.data || event.data.type !== '__EXTENSION_SAVE_ACTION__') {
+    if (event.source !== window || !event.data || event.data.type !== '__EXTENSION_SAVE_LOG__') {
       return;
     }
     const { key, value } = event.data.payload;
@@ -117,7 +117,7 @@ class UserActionRecorder {
       const currentErrorInfos = result[storageKey] || [];
       let updatedErrorInfos = [...currentErrorInfos, value];
       if (max) {
-        updatedErrorInfos.slice(max)
+        updatedErrorInfos = updatedErrorInfos.slice(max);
       }
 
       chrome.storage.local.set({ [storageKey]: updatedErrorInfos });
