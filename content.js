@@ -6,13 +6,9 @@ class UserActionRecorder {
     this.hasEventListeners = false;
     this.boundHandleEvent = this.handleEvent.bind(this);
     this.initialize();
-    this.wrapStorage(localStorage, 'localstorage');
-    this.wrapStorage(sessionStorage, 'sessionStorage');
+    window.addEventListener('message', this.handleExtensionMessage.bind(this));
   }
 
-  getStorageKey() {
-    return `storage_${window.location.host}`;
-  }
   getActionsKey() {
     return `storage_${window.location.host}_actions`;
   }
@@ -34,6 +30,14 @@ class UserActionRecorder {
     });
 
     this.hasEventListeners = true;
+  }
+
+  handleExtensionMessage(event) {
+    if (event.source !== window || !event.data || event.data.type !== '__EXTENSION_SAVE_ACTION__') {
+      return;
+    }
+    const { key, value } = event.data.payload;
+    this.saveToStorage(key, value);
   }
 
   // 事件处理入口
@@ -58,7 +62,7 @@ class UserActionRecorder {
         action.value = event.target.value;
       }
 
-      this.saveToStorage(action);
+      this.saveToStorage(this.getActionsKey(), action, -UserActionRecorder.MAX_ACTIONS);
     } catch (error) {
       console.error('Error recording action:', error);
     }
@@ -108,75 +112,32 @@ class UserActionRecorder {
     return selector;
   }
 
-  // 保存到chrome.storage
-  saveToStorage(action) {
-    const storageKey = this.getActionsKey();
-
-    chrome.storage.local.get([storageKey], result => {
-      const currentActions = result[storageKey] || [];
-      const updatedActions = [...currentActions, action].slice(-UserActionRecorder.MAX_ACTIONS);
-
-      chrome.storage.local.set({ [storageKey]: updatedActions }, () => {
-        console.log(`Actions saved for ${window.location.host}, total: ${updatedActions.length}`);
-      });
-    });
-  }
-
-  // 重写Storage方法
-  wrapStorage(storage, type) {
-    const self = this;
-    const originalSetItem = storage.setItem;
-    const originalRemoveItem = storage.removeItem;
-    const originalClear = storage.clear;
-    storage.setItem = function(key, value) {
-      try {
-        originalSetItem.call(this, key, value);
-      } catch (e) {
-        self.handleStorageError(e, type, { key, value });
-      }
-    };
-
-    storage.removeItem = function(key) {
-      try {
-        originalRemoveItem.call(this, key);
-      } catch (e) {
-        self.handleStorageError(e, type, { key });
-      }
-    };
-
-    storage.clear = function() {
-      try {
-        originalClear.call(this);
-      } catch (e) {
-        self.handleStorageError(e, type);
-      }
-    };
-  }
-
-  handleStorageError(error, storageType, details = {}) {
-    const errorInfo = {
-      // type: 'storageError',
-      storageType,
-      error: {
-        name: error.name,
-        message: error.message,
-        ...details
-      },
-      timestamp: new Date().toISOString()
-    };
-
-    const storageKey = this.getStorageKey();
-
+  saveToStorage(storageKey, value, max = 0) {
     chrome.storage.local.get([storageKey], result => {
       const currentErrorInfos = result[storageKey] || [];
-      const updatedErrorInfos = [...currentErrorInfos, errorInfo];
+      let updatedErrorInfos = [...currentErrorInfos, value];
+      if (max) {
+        updatedErrorInfos.slice(max)
+      }
 
-      chrome.storage.local.set({ [storageKey]: updatedErrorInfos }, () => {
-        // console.log(`Actions saved for ${window.location.host}, total: ${updatedActions.length}`);
-      });
+      chrome.storage.local.set({ [storageKey]: updatedErrorInfos });
     });
-    console.error('Storage Error:', errorInfo);
   }
 }
+function injectMainThreadCode() {
+  const script = document.createElement('script');
+  // 使用 chrome.runtime.getURL 获取扩展内文件的绝对路径
+  script.src = chrome.runtime.getURL('injected.js');
+  script.onload = function() {
+    this.remove(); // 加载完成后移除 script 标签
+  };
+  document.documentElement.appendChild(script);
+}
 
-new UserActionRecorder();
+// 在页面加载完成后注入
+if (['interactive', 'complete'].includes(document.readyState)) {
+  document.addEventListener('DOMContentLoaded', injectMainThreadCode);
+} else {
+  new UserActionRecorder();
+  injectMainThreadCode();
+}
