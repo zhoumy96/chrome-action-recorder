@@ -49,7 +49,7 @@ class UserActionRecorder {
   recordAction(event) {
     try {
       const action = {
-        timestamp: new Date().toLocaleString(),
+        timestamp: new Date().toLocaleString(), // '2025/8/5 10:19:21'
         type: event.type,
         target: this.getElementDescriptor(event.target),
         x: event.clientX || 0,
@@ -62,7 +62,7 @@ class UserActionRecorder {
         action.value = event.target.value;
       }
 
-      this.saveToStorage(this.getActionsKey(), action, -UserActionRecorder.MAX_ACTIONS);
+      this.saveToStorage(this.getActionsKey(), action);
     } catch (error) {
       console.error('Error recording action:', error);
     }
@@ -112,16 +112,52 @@ class UserActionRecorder {
     return selector;
   }
 
-  saveToStorage(storageKey, value, max = 0) {
+  async saveToStorage(storageKey, value) {
+    const isFull = this.checkStorage();
+    if (isFull) {
+      await this.batchCleanData();
+    }
     chrome.storage.local.get([storageKey], result => {
       const currentErrorInfos = result[storageKey] || [];
       let updatedErrorInfos = [...currentErrorInfos, value];
-      if (max) {
-        updatedErrorInfos = updatedErrorInfos.slice(max);
-      }
+      // 只记录100条
+      updatedErrorInfos = updatedErrorInfos.slice(-UserActionRecorder.MAX_ACTIONS);
 
       chrome.storage.local.set({ [storageKey]: updatedErrorInfos });
     });
+  }
+
+  async checkStorage() {
+    const { bytesInUse } = await chrome.storage.local.getBytesInEstimate();
+    return bytesInUse >= 4.5 * 1024 * 1024; // 4.5MB阈值
+  }
+
+  // 清理插件缓存
+  async batchCleanData() {
+    // 获取所有域名 key
+    const allItems = await chrome.storage.local.get(null);
+    const domainKeys = Object.keys(allItems).filter(k => k.startsWith("storage_") && k.endsWith("_actions"));
+
+    // 按域名清理数据
+    const today = new Date().toDateString();
+    const cleanupTasks = domainKeys.map(key => {
+      const data = allItems[key];
+      const hasTodayData = data.some(item =>
+        new Date(item.timestamp).toDateString() === today
+      );
+
+      // 动态清理策略
+      if (!hasTodayData) {
+        return { [key]: [] }; // 当天无数据的，删除全部数据
+      } else {
+        return {
+          [key]: data.slice(-80) // 保留最新80条（删旧20条）
+        };
+      }
+    });
+
+    // 批量写入更新
+    await chrome.storage.local.set(Object.assign({}, ...cleanupTasks));
   }
 }
 function injectMainThreadCode() {

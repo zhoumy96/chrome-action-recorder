@@ -95,7 +95,7 @@ const DownloadManager = {
 
 // Storage模块
 const StorageManager = {
-// 获取详细存储信息（分项统计）
+  // 获取网站详细存储信息（分项统计）
   async getDetailedStorageSizes() {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
     if (!tab?.id) throw new Error('No active tab found');
