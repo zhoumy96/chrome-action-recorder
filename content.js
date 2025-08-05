@@ -128,15 +128,18 @@ class UserActionRecorder {
   }
 
   async checkStorage() {
-    const { bytesInUse } = await chrome.storage.local.getBytesInEstimate();
-    return bytesInUse >= 4.5 * 1024 * 1024; // 4.5MB阈值
+    return new Promise(resolve => {
+      chrome.storage.local.getBytesInUse(bytesInUse => {
+        resolve(bytesInUse >= 4.5 * 1024 * 1024); // 4.5MB阈值
+      });
+    });
   }
 
   // 清理插件缓存
   async batchCleanData() {
     // 获取所有域名 key
     const allItems = await chrome.storage.local.get(null);
-    const domainKeys = Object.keys(allItems).filter(k => k.startsWith("storage_") && k.endsWith("_actions"));
+    const domainKeys = Object.keys(allItems).filter(k => k.startsWith("storage_"));
 
     // 按域名清理数据
     const today = new Date().toDateString();
